@@ -1,18 +1,18 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import joblib
-import praw
+import os
 from collections import Counter
 from datetime import datetime, timezone
-import os
+
+import joblib
+import pandas as pd
+import plotly.graph_objects as go
+import praw
+import streamlit as st
 from dotenv import load_dotenv
-import time
 
 # ======================================================
 # Configuração da página
 # ======================================================
+
 st.set_page_config(
     page_title="Toxicity Analyzer • Reddit",
     page_icon="⚡",
@@ -20,280 +20,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# CSS com design glassmorphism minimalista
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-    
-    /* Reset e tema base */
-    .stApp {
-        background: linear-gradient(135deg, #0a0a0a 0%, #1a0505 100%);
-    }
-    
-    * {
-        font-family: 'Inter', sans-serif;
-    }
-    
-    /* Header principal com glassmorphism */
-    .main-header {
-        background: rgba(255, 255, 255, 0.02);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        padding: 2.5rem;
-        border-radius: 24px;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-    
-    .main-title {
-        font-size: 2.5rem;
-        font-weight: 800;
-        background: linear-gradient(135deg, #fff 0%, #ef4444 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: white;
-        margin: 0;
-        letter-spacing: -1px;
-    }
-    
-    .main-subtitle {
-        color: rgba(255, 255, 255, 0.4);
-        font-size: 0.875rem;
-        font-weight: 400;
-        margin-top: 0.5rem;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-    }
-    
-    /* Métricas com glassmorphism */
-    .metric-card {
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 16px;
-        padding: 1.75rem 1.25rem;
-        text-align: center;
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        height: 100%;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-4px);
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(239, 68, 68, 0.3);
-    }
-    
-    .metric-value {
-        font-size: 2.25rem;
-        font-weight: 700;
-        color: #fff;
-        line-height: 1;
-        margin-bottom: 0.5rem;
-    }
-    
-    .metric-label {
-        font-size: 0.75rem;
-        color: rgba(255, 255, 255, 0.4);
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        font-weight: 500;
-    }
-    
-    .metric-toxic .metric-value {
-        background: linear-gradient(135deg, #ef4444, #dc2626);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    
-    /* Badge de classificação */
-    .classification-badge {
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
-        padding: 2rem;
-        margin: 2rem 0;
-        text-align: center;
-    }
-    
-    .badge-label {
-        display: inline-block;
-        padding: 0.75rem 2rem;
-        border-radius: 100px;
-        font-weight: 600;
-        font-size: 1rem;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        margin-bottom: 1rem;
-    }
-    
-    .extreme { 
-        background: linear-gradient(135deg, #dc2626, #991b1b); 
-        color: #fff;
-        animation: pulse 2s infinite;
-    }
-    
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.8; }
-    }
-    
-    .high { 
-        background: linear-gradient(135deg, #ea580c, #c2410c); 
-        color: #fff;
-    }
-    
-    .moderate { 
-        background: linear-gradient(135deg, #f59e0b, #d97706); 
-        color: #fff;
-    }
-    
-    .low { 
-        background: linear-gradient(135deg, #10b981, #059669); 
-        color: #fff;
-    }
-    
-    .clean { 
-        background: linear-gradient(135deg, #06b6d4, #0891b2); 
-        color: #fff;
-    }
-    
-    /* Comentários tóxicos */
-    .toxic-comment {
-        background: rgba(239, 68, 68, 0.03);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(239, 68, 68, 0.15);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        position: relative;
-        transition: all 0.3s ease;
-    }
-    
-    .toxic-comment:hover {
-        background: rgba(239, 68, 68, 0.05);
-        transform: translateX(4px);
-    }
-    
-    .rank-number {
-        position: absolute;
-        top: -8px;
-        left: 20px;
-        background: linear-gradient(135deg, #ef4444, #dc2626);
-        color: #fff;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-weight: 700;
-        font-size: 0.875rem;
-    }
-    
-    .comment-text {
-        color: rgba(255, 255, 255, 0.8);
-        line-height: 1.6;
-        margin: 1rem 0;
-    }
-    
-    .comment-meta {
-        display: flex;
-        gap: 1.5rem;
-        font-size: 0.75rem;
-        color: rgba(255, 255, 255, 0.4);
-        padding-top: 1rem;
-        border-top: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    
-    .toxicity-indicator {
-        width: 100%;
-        height: 4px;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 2px;
-        overflow: hidden;
-        margin: 0.75rem 0;
-    }
-    
-    .toxicity-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #dc2626, #ef4444);
-        border-radius: 2px;
-    }
-    
-    /* Botão customizado */
-    .stButton > button {
-        background: linear-gradient(135deg, #ef4444, #dc2626) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 12px !important;
-        padding: 0.875rem 2rem !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.5px !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3) !important;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 25px rgba(239, 68, 68, 0.4) !important;
-    }
-    
-    /* Input field */
-    .stTextInput > div > div > input {
-        background: rgba(255, 255, 255, 0.03) !important;
-        border: 1px solid rgba(255, 255, 255, 0.08) !important;
-        border-radius: 12px !important;
-        color: #fff !important;
-        padding: 0.875rem 1rem !important;
-    }
-    
-    .stTextInput > div > div > input:focus {
-        background: rgba(255, 255, 255, 0.05) !important;
-        border-color: rgba(239, 68, 68, 0.4) !important;
-        box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.2) !important;
-    }
-    
-    /* Seções */
-    .section-divider {
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(239, 68, 68, 0.3), transparent);
-        margin: 3rem 0 2rem 0;
-    }
-    
-    .section-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: rgba(255, 255, 255, 0.9);
-        margin-bottom: 1.5rem;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    /* Hide streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    .stDeployButton {display: none;}
-    
-    /* Progress bar */
-    .stProgress > div > div > div {
-        background: linear-gradient(90deg, #ef4444, #dc2626) !important;
-    }
-    /* SLIDER */
-     .stSlider > div > div > div > div {
-        background: linear-gradient(90deg, #ef4444, #dc2626) !important;
-    }
-    
-    .stSlider > div > div > div {
-        background: rgba(255, 255, 255, 0.1) !important;
-        border-radius: 100px !important;
-    }
-    
-    .stSlider > div > div > div > div > div {
-    
-    }
-</style>
-""", unsafe_allow_html=True)
+# CSS com design glassmorphism
+st.markdown(f"<style>{open('style.css').read()}</style>", unsafe_allow_html=True)
 
 # ======================================================
 # Função de análise
 # ======================================================
+
 def analisar_perfil_usuario(username, reddit, model, vectorizer, limite=100):
     def avaliar_toxicidade_local(comentario):
         try:
@@ -399,14 +132,15 @@ def get_classification(percentual):
 # ======================================================
 # Inicialização
 # ======================================================
+
 @st.cache_resource
 def init_reddit_and_models():
     load_dotenv()
     
     try:
-        model = joblib.load("modelo_odio.joblib")
-        vectorizer = joblib.load("vetorizador_odio.joblib")
-        
+        model = joblib.load("joblib/modelo_odio.joblib")
+        vectorizer = joblib.load("joblib/vetorizador_odio.joblib")
+
         reddit = praw.Reddit(
             client_id=os.getenv("CLIENT_ID"),
             client_secret=os.getenv("CLIENT_SECRET"),
